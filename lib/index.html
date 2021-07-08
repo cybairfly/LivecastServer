@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Live view</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
     <style>
         body {
             font-family: sans-serif;
@@ -109,19 +110,33 @@
         #resumeButton:hover {
             background-color: #4cae4c;
         }
+
+        .hidden {
+            display: none;
+        }
+
     </style>
     <script src="https://cdn.socket.io/3.1.3/socket.io.min.js"></script>
     <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
-    <script src="./init-last-snapshot.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.16.0/themes/prism.min.css" rel="stylesheet"/>
     <script>
         let liveViewSocket = null;
         function showSnapshot(snapshot) {
             if (!snapshot) return;
+            const hasImg = snapshot.screenshotIndex !== null;
+            if (hasImg) {
+                console.log('Show screenshot');
+                activateScreenshotTab();
+                $('div#screenshotDiv').show();
+            } else {
+                console.log('Hide screenshot');
+                activateHtmlTab();
+                $('#screenshotLink').hide();
+            }
             $('#pageUrl').text(snapshot.pageUrl).attr('href', snapshot.pageUrl);
             $('#htmlContent').text(snapshot.htmlContent);
-            $('#screenshotImg').attr('src', `./screenshot/${snapshot.screenshotIndex}`);
             $('#waitContainer').hide();
+            if (hasImg) $('#screenshotImg').attr('src', `./screenshot/${snapshot.screenshotIndex}`);
             $('#snapshotContainer').show();
             Prism.highlightAll();
         }
@@ -137,6 +152,7 @@
                 $('#pauseButton').show();
                 liveViewSocket.emit('getLastSnapshot');
             });
+            liveViewSocket.on('prompt', showPrompt)
             liveViewSocket.on('disconnect', () => {
                 $('#resumeButton').show();
                 $('#pauseButton').hide();
@@ -159,6 +175,20 @@
             }
         }
 
+        function showPrompt(promptOptions={}) {
+            console.log('Showing promt.', promptOptions)
+            const { title='Confirm', message='Confirm' } = promptOptions;
+            $('#prompt').modal('show');
+            $('#prompt .modal-title').text(title);
+            $('#prompt .modal-body').text(message);
+        }
+
+        function answerPrompt(data) {
+            console.log('Sending answer to prompt.', data);
+            $('#prompt').modal('hide');
+            liveViewSocket.emit('answerPrompt', data);
+        }
+
         function isThisTopWindow () {
             try {
                 return window.self === window.top;
@@ -168,6 +198,21 @@
         }
 
         window.addEventListener('message', onMessageFromPlatform);
+
+        const activateScreenshotTab = () => {
+            $('#htmlLink').removeClass('active');
+            $('#screenshotLink').addClass('active');
+            $('#screenshotDiv').show();
+            $('#htmlDiv').hide();
+        }
+
+        const activateHtmlTab = () => {
+            $('#screenshotLink').removeClass('active');
+            $('#htmlLink').addClass('active');
+            $('#screenshotDiv').hide();
+            $('#htmlDiv').show();
+        }
+
         $(() => {
             // Show initial snapshot if it exists when client is fetched.
             showSnapshot(window.lastSnapshot);
@@ -189,15 +234,11 @@
             });
             $('#screenshotLink').click((event) => {
                 event.preventDefault();
-                $('.tab-menu li').toggleClass('active');
-                $('#screenshotDiv').show();
-                $('#htmlDiv').hide();
+                activateScreenshotTab();
             });
             $('#htmlLink').click(() => {
                 event.preventDefault();
-                $('.tab-menu li').toggleClass('active');
-                $('#screenshotDiv').hide();
-                $('#htmlDiv').show();
+                activateHtmlTab();
             });
         });
     </script>
@@ -211,6 +252,27 @@
 </header>
 
 <main>
+    <div id="prompt" class="hidden modal fade" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog" role="document" >
+            <div class="modal-content">
+              <div class="modal-header">
+                <h4 class="modal-title">Modal title</h4>
+              </div>
+              <div class="modal-body">
+                  user can select an option here from a list
+              </div>
+              <div class="modal-footer">
+                <button type="button" id="cancel" onclick="answerPrompt({action: 'cancel'})"
+                    class="btn btn-danger">CANCEL</button>
+                <button type="button" id="abort" class="btn btn-light"
+                    onclick="answerPrompt({action: 'abort'})">ABORT</button>
+                <button type="button" id="confirm" class="btn btn-primary"
+                    onclick="answerPrompt({action: 'confirm'})">CONFIRM</button>
+              </div>
+            </div>
+         </div>
+    </div>
+
     <p id="waitContainer">
         Please wait for the actor to start and make a first snapshot.<br>
         <img src="./loading.gif"/>
@@ -244,6 +306,6 @@
         </div>
     </div>
 </main>
-
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
 </body>
 </html>
