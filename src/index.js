@@ -293,7 +293,7 @@ class LivecastServer {
         this.httpServer = http.createServer();
         const app = express();
 
-        app.use('/', express.static(__dirname));
+        app.use('/', express.static(path.join(__dirname, '../public')));
 
         // Serves JPEG with the last screenshot
         app.get('/screenshot/:index', (req, res) => {
