@@ -126,10 +126,8 @@
             const hasImg = snapshot.screenshotIndex !== null;
             if (hasImg) {
                 console.log('Show screenshot');
-                activateScreenshotTab();
-                $('div#screenshotDiv').show();
+                $('#screenshotLink').show();
             } else {
-                console.log('Hide screenshot');
                 activateHtmlTab();
                 $('#screenshotLink').hide();
             }
