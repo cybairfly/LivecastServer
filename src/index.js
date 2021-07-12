@@ -22,7 +22,7 @@ const LOCAL_STORAGE_DIR = process.env[ENV_VARS.LOCAL_STORAGE_DIR] || '';
 const DEFAULT_SCREENSHOT_DIR_PATH = path.resolve(LOCAL_STORAGE_DIR, 'live_view');
 
 /**
- * `LiveViewServer` enables serving of browser snapshots via web sockets. It includes its own client
+ * `LivecastServer` enables serving of browser snapshots via web sockets. It includes its own client
  * that provides a simple frontend to viewing the captured snapshots. A snapshot consists of three
  * pieces of information, the currently opened URL, the content of the page (HTML) and its screenshot.
  *
@@ -35,29 +35,25 @@ const DEFAULT_SCREENSHOT_DIR_PATH = path.resolve(LOCAL_STORAGE_DIR, 'live_view')
  * }
  * ```
  *
- * `LiveViewServer` is useful when you want to be able to inspect the current browser status on demand.
+ * `LivecastServer` is useful when you want to be able to inspect the current browser status on demand.
  * When no client is connected, the webserver consumes very low resources so it should have a close
  * to zero impact on performance. Only once a client connects the server will start serving snapshots.
  * Once no longer needed, it can be disabled again in the client to remove any performance impact.
  *
- * NOTE: Screenshot taking in browser typically takes around 300ms. So having the `LiveViewServer`
+ * NOTE: Screenshot taking in browser typically takes around 300ms. So having the `LivecastServer`
  * always serve snapshots will have a significant impact on performance.
- *
- * When using {@link PuppeteerPool}, the `LiveViewServer` can be
- * easily used just by providing the `useLiveView = true` option to the {@link PuppeteerPool}.
- * It can also be initiated via {@link PuppeteerCrawler} `puppeteerPoolOptions`.
  *
  * It will take snapshots of the first page of the latest browser. Taking snapshots of only a
  * single page improves performance and stability dramatically in high concurrency situations.
  *
  * When running locally, it is often best to use a headful browser for debugging, since it provides
- * a better view into the browser, including DevTools, but `LiveViewServer` works too.
+ * a better view into the browser, including DevTools, but `LivecastServer` works too.
  * @ignore
  */
-class LiveViewServer {
+class LivecastServer {
     /**
      * @param {Object} [options]
-     *   All `LiveViewServer` parameters are passed
+     *   All `LivecastServer` parameters are passed
      *   via an options object with the following keys:
      * @param {string} [options.screenshotDirectoryPath]
      *   By default, the screenshots are saved to
@@ -72,7 +68,7 @@ class LiveViewServer {
      *   pages from being hung up by a stalled screenshot.
      * @param {number} [options.maxSnapshotFrequencySecs=2]
      *   Use this parameter to further decrease the resource consumption
-     *   of `LiveViewServer` by limiting the frequency at which it'll
+     *   of `LivecastServer` by limiting the frequency at which it'll
      *   serve snapshots.
      */
     constructor(options = {}) {
@@ -81,13 +77,17 @@ class LiveViewServer {
             maxScreenshotFiles = 10,
             snapshotTimeoutSecs = 3,
             maxSnapshotFrequencySecs = 2,
+            useScreenshots = false,
+            promptHandlers = {},
         } = options;
 
-        this.log = defaultLog.child({ prefix: 'LiveViewServer' });
+        this.log = defaultLog.child({ prefix: 'LivecastServer' });
         this.screenshotDirectoryPath = screenshotDirectoryPath;
         this.maxScreenshotFiles = maxScreenshotFiles;
         this.snapshotTimeoutMillis = snapshotTimeoutSecs * 1000;
         this.maxSnapshotFrequencyMillis = maxSnapshotFrequencySecs * 1000;
+        this.useScreenshots = useScreenshots;
+        this.promptHandlers = promptHandlers;
 
         /**
          * @type {?Snapshot}
@@ -104,6 +104,24 @@ class LiveViewServer {
         this.servingSnapshot = false;
 
         this._setupHttpServer();
+    }
+
+    async prompt(options = {}) {
+        const response = await new Promise((resolve) => {
+            this.resolveMessagePromise = resolve;
+            this.send('prompt', options)
+                .then(() => this.log.debug('Waiting for frontend prompt response'));
+        });
+        this.log.debug('Response data.', { response });
+        this.handleResponse(response);
+    }
+
+    handleResponse(response) {
+        if (!this.promptHandlers[response.action]) {
+            this.log.warning('No handler for response action', response);
+            return;
+        }
+        return this.promptHandlers[response.action](response);
     }
 
     /**
@@ -151,13 +169,20 @@ class LiveViewServer {
      * @return {Promise<void>}
      */
     async serve(page) {
-        if (!this.hasClients()) return;
+        if (!this.hasClients()) {
+            this.log.debug('Live view server has no clients, skipping snapshot.');
+            return;
+        }
         // Only serve one snapshot at a time because Puppeteer
         // can't make screenshots in parallel.
-        if (this.servingSnapshot) return;
+        if (this.servingSnapshot) {
+            this.log.debug('Already serving a snapshot, not starting a new one.');
+            return;
+        }
 
-        if (this.lastSnapshot) {
-            if (this.lastSnapshot.age() < this.maxSnapshotFrequencyMillis) return;
+        if (this.lastSnapshot && this.lastSnapshot.age() < this.maxSnapshotFrequencyMillis) {
+            this.log.debug(`Snapshot was already served in less than ${this.maxSnapshotFrequencyMillis}ms.`);
+            return;
         }
 
         try {
@@ -165,9 +190,11 @@ class LiveViewServer {
             const snapshot = await addTimeoutToPromise(
                 this._makeSnapshot(page),
                 this.snapshotTimeoutMillis,
-                'LiveViewServer: Serving of Live View timed out.',
+                'LivecastServer: Serving of Live View timed out.',
             );
             this._pushSnapshot(snapshot);
+        } catch (err) {
+            this.log.exception(err, 'Serving of page for live view failed');
         } finally {
             this.servingSnapshot = false;
         }
@@ -184,8 +211,13 @@ class LiveViewServer {
      * @return {boolean}
      */
     hasClients() {
-        // Treat LiveViewServer as a client, until at least one snapshot is made.
+        // Treat LivecastServer as a client, until at least one snapshot is made.
         return this.lastSnapshot ? this.clientCount > 0 : true;
+    }
+
+    async send(message, data) {
+        this.log.debug('Sending socket.io message', { message });
+        this.socketio.emit(message, data);
     }
 
     /**
@@ -208,17 +240,19 @@ class LiveViewServer {
         this.log.info('Making live view snapshot.', { pageUrl });
         const [htmlContent, screenshot] = await Promise.all([
             page.content(),
-            page.screenshot({
+            this.useScreenshots ? page.screenshot({
                 type: 'jpeg',
                 quality: 75,
-            }),
+            }) : null,
         ]);
 
-        const screenshotIndex = this.lastScreenshotIndex++;
+        const screenshotIndex = this.useScreenshots ? this.lastScreenshotIndex++ : null;
 
-        await writeFile(this._getScreenshotPath(screenshotIndex), screenshot);
-        if (screenshotIndex > this.maxScreenshotFiles - 1) {
-            this._deleteScreenshot(screenshotIndex - this.maxScreenshotFiles);
+        if (screenshot) {
+            await writeFile(this._getScreenshotPath(screenshotIndex), screenshot);
+            if (screenshotIndex > this.maxScreenshotFiles - 1) {
+                this._deleteScreenshot(screenshotIndex - this.maxScreenshotFiles);
+            }
         }
 
         const snapshot = new Snapshot({ pageUrl, htmlContent, screenshotIndex });
@@ -233,7 +267,7 @@ class LiveViewServer {
     _pushSnapshot(snapshot) {
         // Send new snapshot to clients
         this.log.debug('Sending live view snapshot', { createdAt: snapshot.createdAt, pageUrl: snapshot.pageUrl });
-        this.socketio.emit('snapshot', snapshot);
+        this.send('snapshot', snapshot);
     }
 
     /**
@@ -251,7 +285,7 @@ class LiveViewServer {
 
         this.port = parseInt(containerPort, 10);
         if (!(this.port >= 0 && this.port <= 65535)) {
-            throw new Error('Cannot start LiveViewServer - invalid port specified by the '
+            throw new Error('Cannot start LivecastServer - invalid port specified by the '
                 + `${ENV_VARS.CONTAINER_PORT} environment variable (was "${containerPort}").`);
         }
         this.liveViewUrl = process.env[ENV_VARS.CONTAINER_URL] || LOCAL_ENV_VARS[ENV_VARS.CONTAINER_URL];
@@ -259,7 +293,7 @@ class LiveViewServer {
         this.httpServer = http.createServer();
         const app = express();
 
-        app.use('/', express.static(__dirname));
+        app.use('/', express.static(path.join(__dirname, '../public')));
 
         // Serves JPEG with the last screenshot
         app.get('/screenshot/:index', (req, res) => {
@@ -280,7 +314,7 @@ class LiveViewServer {
     }
 
     /**
-     * @param {socketio.Socket} socket
+     * @param {socketio.Socket} socketPrompt
      * @private
      */
     _socketConnectionHandler(socket) {
@@ -290,13 +324,25 @@ class LiveViewServer {
             this.clientCount--;
             this.log.info('Live view client disconnected', { clientId: socket.id, reason });
         });
+        socket.on('answerPrompt', (data) => {
+            this.log.debug('answerPrompt', data);
+
+            try {
+                data = JSON.parse(data);
+            } catch (error) {
+                this.log.debug('Failed to parse incoming message data', data);
+            }
+
+            this.resolveMessagePromise(data);
+        });
+
         socket.on('getLastSnapshot', () => {
             if (this.lastSnapshot) {
                 this.log.debug('Sending live view snapshot', { createdAt: this.lastSnapshot.createdAt, pageUrl: this.lastSnapshot.pageUrl });
-                this.socketio.emit('snapshot', this.lastSnapshot);
+                this.send('snapshot', this.lastSnapshot);
             }
         });
     }
 }
 
-module.exports = LiveViewServer;
+module.exports = LivecastServer;
