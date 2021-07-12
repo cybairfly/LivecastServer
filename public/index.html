@@ -163,6 +163,7 @@
             }
         }
 
+        // TODO: this is never actually triggered
         function onMessageFromPlatform(msg) {
             if (msg.data === 'LIVE_VIEW_TAB_OPEN') {
                 msg.source.postMessage('ACK', msg.origin);
@@ -216,7 +217,10 @@
             showSnapshot(window.lastSnapshot);
 
             // When displayed in a separate window, connect immediately.
-            if (isThisTopWindow()) connect();
+            // TODO: find a working way to skip connecting if live view is not opened
+            // if (isThisTopWindow()) connect();
+            
+            connect();
 
             $('#resumeButton').click((event) => {
                 event.preventDefault();
