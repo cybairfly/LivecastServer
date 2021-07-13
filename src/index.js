@@ -216,7 +216,7 @@ class LivecastServer {
     }
 
     async send(message, data) {
-        this.log.debug('Sending socket.io message', { message });
+        this.log.debug('Sending websocket message', { message });
         this.socketio.emit(message, data);
     }
 
@@ -324,11 +324,11 @@ class LivecastServer {
             this.clientCount--;
             this.log.info('Live view client disconnected', { clientId: socket.id, reason });
         });
-        socket.on('answerPrompt', (data) => {
-            this.log.debug('answerPrompt', data);
+        socket.on('promptAnswer', (data) => {
+            this.log.debug('promptAnswer', data);
 
             try {
-                data = JSON.parse(data);
+                data = JSON.parse(`${data}`);
             } catch (error) {
                 this.log.debug('Failed to parse incoming message data', data);
             }

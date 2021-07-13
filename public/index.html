@@ -175,17 +175,17 @@
         }
 
         function showPrompt(promptOptions={}) {
-            console.log('Showing promt.', promptOptions)
+            console.log('Showing prompt.', promptOptions)
             const { title='Confirm', message='Confirm' } = promptOptions;
             $('#prompt').modal('show');
             $('#prompt .modal-title').text(title);
             $('#prompt .modal-body').text(message);
         }
 
-        function answerPrompt(data) {
+        function promptAnswer(data) {
             console.log('Sending answer to prompt.', data);
             $('#prompt').modal('hide');
-            liveViewSocket.emit('answerPrompt', data);
+            liveViewSocket.emit('promptAnswer', data);
         }
 
         function isThisTopWindow () {
@@ -264,12 +264,12 @@
                   user can select an option here from a list
               </div>
               <div class="modal-footer">
-                <button type="button" id="cancel" onclick="answerPrompt({action: 'cancel'})"
+                <button type="button" id="cancel" onclick="promptAnswer({action: 'cancel'})"
                     class="btn btn-danger">CANCEL</button>
                 <button type="button" id="abort" class="btn btn-light"
-                    onclick="answerPrompt({action: 'abort'})">ABORT</button>
+                    onclick="promptAnswer({action: 'abort'})">ABORT</button>
                 <button type="button" id="confirm" class="btn btn-primary"
-                    onclick="answerPrompt({action: 'confirm'})">CONFIRM</button>
+                    onclick="promptAnswer({action: 'confirm'})">CONFIRM</button>
               </div>
             </div>
          </div>

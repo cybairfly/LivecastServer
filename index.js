@@ -1,3 +1,3 @@
-const Server = require('./src/index');
+const LiveCastServer = require('./src/index');
 
-module.exports = Server;
+module.exports = { LiveCastServer };
